@@ -4,6 +4,7 @@
 #include <time.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
@@ -772,6 +773,66 @@ void filter_reports(const char *district, const char *role, const char *user, in
   log_action(district, role, user, "filter");
 }
 
+void remove_district(const char *district, const char *role)
+{
+  char link_name[256];
+  pid_t pid;
+  int status;
+
+  if (strcmp(role, "manager") != 0)
+    {
+      fprintf(stderr, "Eroare de permisiune: doar managerul poate sterge un district.\n");
+      exit(1);
+    }
+
+  if (district == NULL || strlen(district) == 0 || strcmp(district, ".") == 0 || strcmp(district, "..") == 0 || strchr(district, '/') != NULL)
+    {
+      fprintf(stderr, "Eroare: nume de district invalid pentru stergere.\n");
+      exit(1);
+    }
+  snprintf(link_name, sizeof(link_name), "active_reports-%s", district);
+
+  if (unlink(link_name) == -1)
+    {
+      if (errno != ENOENT)
+        {
+          perror("Eroare la stergerea symlink-ului districtului");
+          exit(1);
+        }
+    }
+
+  pid = fork();
+  if (pid == -1)
+    {
+      perror("Eroare la fork");
+      exit(1);
+    }
+
+  if (pid == 0)
+    {
+      execlp("rm", "rm", "-rf", district, (char *)NULL);
+
+      perror("Eroare la execlp pentru rm -rf");
+      exit(1);
+    }
+
+  if (waitpid(pid, &status, 0) == -1)
+    {
+      perror("Eroare la waitpid");
+      exit(1);
+    }
+
+  if (WIFEXITED(status) && WEXITSTATUS(status) == 0)
+    {
+      printf("Districtul %s a fost sters cu succes.\n", district);
+    }
+  else
+    {
+      fprintf(stderr, "Eroare: stergerea districtului %s nu s-a terminat cu succes.\n", district);
+      exit(1);
+    }
+}
+
 int main(int argc, char **argv)
 {
   char *role = NULL;
@@ -899,6 +960,23 @@ int main(int argc, char **argv)
 
     district = argv[6];
     filter_reports(district, role, user, argc - 7, &argv[7]);
+  }
+  else if (strcmp(command, "--remove_district") == 0)
+  {
+    if (argc != 7)
+      {
+        fprintf(stderr, "Utilizare corecta: %s --role manager --user <nume> --remove_district <district>\n", argv[0]);
+        return 1;
+      }
+
+    if (strcmp(role, "manager") != 0)
+      {
+        fprintf(stderr, "Eroare de permisiune: doar rolul de 'manager' poate sterge un district.\n");
+        return 1;
+      }
+
+    district = argv[6];
+    remove_district(district, role);
   }
   else
     {
