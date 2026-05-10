@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <signal.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -292,6 +293,46 @@ int valid_category(const char *category)
   return 0;
 }
 
+void notify_monitor(const char *district, const char *role, const char *user)
+{
+  int fd;
+  char buffer[64];
+  ssize_t bytes_read;
+  pid_t monitor_pid;
+
+  fd = open(".monitor_pid", O_RDONLY);
+  if (fd == -1)
+    {
+      log_action(district, role, user, "EROARE: monitorul nu a putut fi notificat (.monitor_pid lipsa)");
+      return;
+    }
+
+  bytes_read = read(fd, buffer, sizeof(buffer)-1);
+  close(fd);
+
+  if (bytes_read <= 0)
+    {
+      log_action(district, role, user, "EROARE: monitorul nu a putut fi notificat (.monitor_pid gol)");
+      return;
+    }
+  buffer[bytes_read] = '\0';
+
+  monitor_pid = (pid_t)atoi(buffer);
+
+  if (monitor_pid <= 0)
+    {
+      log_action(district, role, user, "EROARE: monitorul nu a putut fi notificat (PID invalid)");
+      return;
+    }
+
+  if (kill(monitor_pid, SIGUSR1) == -1)
+    {
+      log_action(district, role, user, "EROARE: monitorul nu a putut fi notificat (kill esuat)");
+      return;
+    }
+  log_action(district, role, user, "Monitor notificat cu succes prin SIGUSR1");
+}
+
 void add_report(const char *district, const char *role, const char *user)
 {
   char path[256];
@@ -370,7 +411,10 @@ void add_report(const char *district, const char *role, const char *user)
     }
 
   close(fd);
+
+  update_symlink(district);
   log_action(district, role, user, "add");
+  notify_monitor(district, role, user);
   printf("Raportul %d a fost adaugat cu succes.\n", r.id);
 }
 
